@@ -8,6 +8,7 @@ from tkinter import ttk, messagebox
 from pynput import keyboard
 import threading
 import time
+import subprocess
 
 class Config:
     def __init__(self):
@@ -312,36 +313,74 @@ class MainWindow:
         self.config.save_config()
         messagebox.showinfo("成功", "配置已保存，重启程序后快捷键生效")
 
+    def get_selected_text(self):
+        """获取选中的文本"""
+        if sys.platform == 'darwin':  # macOS
+            script = '''
+            tell application "System Events"
+                set frontApp to first application process whose frontmost is true
+                set frontAppName to name of frontApp
+                tell process frontAppName
+                    keystroke "c" using command down
+                    delay 0.1
+                end tell
+            end tell
+            return the clipboard
+            '''
+            try:
+                proc = subprocess.run(['osascript', '-e', script], 
+                                    capture_output=True, text=True)
+                if proc.returncode == 0:
+                    return proc.stdout.strip()
+                else:
+                    print(f"AppleScript 执行失败: {proc.stderr}")
+                    return ""
+            except Exception as e:
+                print(f"执行 AppleScript 时出错: {str(e)}")
+                return ""
+        else:  # Windows/Linux
+            try:
+                # 使用 pynput 模拟复制操作
+                c = keyboard.Controller()
+                if sys.platform == 'win32':  # Windows
+                    c.press(keyboard.Key.ctrl)
+                    c.press('c')
+                    c.release('c')
+                    c.release(keyboard.Key.ctrl)
+                else:  # Linux
+                    c.press(keyboard.Key.ctrl)
+                    c.press('c')
+                    c.release('c')
+                    c.release(keyboard.Key.ctrl)
+                
+                # 等待复制完成
+                time.sleep(0.1)
+                
+                # 获取剪贴板内容
+                return pyperclip.paste()
+            except Exception as e:
+                print(f"使用 pynput 获取文本时出错: {str(e)}")
+                return ""
+
     def process_clipboard(self):
         try:
             print("开始处理选中文本")  # 调试信息
             
             # 保存当前剪贴板内容
             old_clipboard = pyperclip.paste()
+            print(f"保存的原始剪贴板内容: {old_clipboard}")  # 调试信息
             
-            # 使用 AppleScript 模拟复制操作
-            if sys.platform == 'darwin':  # macOS
-                import subprocess
-                subprocess.run(['osascript', '-e', 'tell application "System Events" to keystroke "c" using {command down}'])
-            else:  # Windows/Linux
-                keyboard.Controller().press(keyboard.Key.ctrl)
-                keyboard.Controller().press('c')
-                keyboard.Controller().release('c')
-                keyboard.Controller().release(keyboard.Key.ctrl)
-            
-            # 等待复制完成
-            time.sleep(0.5)
-            
-            # 获取新的剪贴板内容
-            text = pyperclip.paste()
+            # 获取选中的文本
+            text = self.get_selected_text()
+            print(f"获取到的文本: {text}")  # 调试信息
             
             # 恢复原来的剪贴板内容
             pyperclip.copy(old_clipboard)
-            
-            print(f"获取到的文本: {text}")  # 调试信息
+            print(f"已恢复原始剪贴板内容")  # 调试信息
             
             if not text:
                 print("未获取到文本")  # 调试信息
+                messagebox.showerror("错误", "未能获取到选中的文本")
                 return
 
             headers = {
@@ -372,6 +411,7 @@ class MainWindow:
                 
                 print(f"API 响应状态码: {response.status_code}")  # 调试信息
                 print(f"API 响应内容: {response.text}")  # 调试信息
+                print(f"API 响应头: {response.headers}")  # 调试信息
 
                 if response.status_code == 200:
                     messagebox.showinfo("成功", "文本已成功导入到知识库")
