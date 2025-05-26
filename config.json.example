@@ -1,6 +1,7 @@
 {
     "api_key": "",
     "knowledge_base_id": "",
+    "document_id": "",
     "api_url": "http://localhost:8000",
     "hotkey": "ctrl+alt+v"
 }

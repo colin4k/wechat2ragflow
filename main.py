@@ -7,6 +7,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from pynput import keyboard
 import threading
+import time
 
 class Config:
     def __init__(self):
@@ -14,6 +15,7 @@ class Config:
         self.default_config = {
             "api_key": "",
             "knowledge_base_id": "",
+            "document_id": "",
             "api_url": "http://localhost:8000",
             "hotkey": "<ctrl>+<alt>+v"
         }
@@ -39,26 +41,163 @@ class HotkeyThread(threading.Thread):
         self.running = True
         self.listener = None
         self.daemon = True
+        print(f"初始化热键线程，热键设置为: {hotkey}")  # 调试信息
 
     def on_activate(self):
+        print("热键被触发")  # 调试信息
         self.callback()
 
     def run(self):
         try:
-            hotkey_parts = self.hotkey.replace("ctrl", "<ctrl>").replace("alt", "<alt>").replace("shift", "<shift>").split("+")
-            hotkey_parts = [part.strip() for part in hotkey_parts]
+            # 转换热键格式
+            hotkey_parts = []
+            for part in self.hotkey.split('+'):
+                part = part.strip().lower()
+                if part.startswith('<') and part.endswith('>'):
+                    part = part[1:-1]
+                if part in ['ctrl', 'alt', 'shift', 'cmd']:
+                    hotkey_parts.append(f"<{part}>")
+                else:
+                    # 对于普通按键，直接使用字符
+                    hotkey_parts.append(part)
+            
+            hotkey_str = '+'.join(hotkey_parts)
+            print(f"转换后的热键格式: {hotkey_str}")  # 调试信息
             
             with keyboard.GlobalHotKeys({
-                "+".join(hotkey_parts): self.on_activate
+                hotkey_str: self.on_activate
             }) as self.listener:
+                print("热键监听器已启动")  # 调试信息
                 self.listener.join()
         except Exception as e:
-            print(f"Hotkey error: {str(e)}")
+            print(f"热键监听器错误: {str(e)}")  # 调试信息
+            import traceback
+            traceback.print_exc()  # 打印完整的错误堆栈
 
     def stop(self):
+        print("停止热键监听器")  # 调试信息
         self.running = False
         if self.listener:
             self.listener.stop()
+
+class HotkeyEntry(ttk.Entry):
+    def __init__(self, master=None, **kwargs):
+        super().__init__(master, **kwargs)
+        self.current_keys = set()
+        
+        # 设置只读
+        self.configure(state='readonly')
+        
+        # 提示文本
+        self.placeholder = "点击此处并按下快捷键组合"
+        self.insert(0, self.placeholder)
+        self.configure(foreground='gray')
+        
+        # 绑定点击事件
+        self.bind('<Button-1>', self.on_click)
+        self.bind('<FocusOut>', self.on_focus_out)
+
+    def on_click(self, event):
+        # 清除当前内容
+        self.configure(state='normal')  # 临时允许编辑
+        self.delete(0, tk.END)
+        self.configure(foreground='black')
+        self.current_keys.clear()  # 清空当前按键集合
+        self.configure(state='readonly')  # 恢复只读状态
+        
+        # 绑定所有键盘事件
+        self.master.bind_all('<Key>', self.on_key)
+        print("开始监听键盘事件")  # 调试信息
+
+    def on_focus_out(self, event):
+        # 解绑所有键盘事件
+        self.master.unbind_all('<Key>')
+        print("停止监听键盘事件")  # 调试信息
+        
+        if not self.get() or self.get() == self.placeholder:
+            self.configure(state='normal')  # 临时允许编辑
+            self.delete(0, tk.END)
+            self.insert(0, self.placeholder)
+            self.configure(foreground='gray')
+            self.configure(state='readonly')  # 恢复只读状态
+
+    def on_key(self, event):
+        print(f"按键事件: {event.keysym}")  # 调试信息
+        
+        # 处理修饰键
+        if event.keysym in ('Control_L', 'Control_R', 'Alt_L', 'Alt_R', 'Shift_L', 'Shift_R', 'Meta_L', 'Meta_R'):
+            if event.keysym not in self.current_keys:
+                self.current_keys.add(event.keysym)
+                self.update_hotkey_display()
+            return
+            
+        # 处理 Escape 键
+        if event.keysym == 'Escape':
+            self.master.unbind_all('<Key>')
+            self.current_keys.clear()
+            self.configure(state='normal')  # 临时允许编辑
+            self.delete(0, tk.END)
+            self.insert(0, self.placeholder)
+            self.configure(foreground='gray')
+            self.configure(state='readonly')  # 恢复只读状态
+            return
+            
+        # 更新当前按键集合
+        if event.keysym not in self.current_keys:
+            self.current_keys.add(event.keysym)
+            self.update_hotkey_display()
+
+    def update_hotkey_display(self):
+        if not self.current_keys:
+            self.configure(state='normal')  # 临时允许编辑
+            self.delete(0, tk.END)
+            self.insert(0, self.placeholder)
+            self.configure(foreground='gray')
+            self.configure(state='readonly')  # 恢复只读状态
+            return
+
+        # 转换按键为显示格式
+        display_keys = []
+        for key in sorted(self.current_keys):
+            if key.lower() in ('control_l', 'control_r'):
+                display_keys.append('Ctrl')
+            elif key.lower() in ('alt_l', 'alt_r'):
+                display_keys.append('Alt')
+            elif key.lower() in ('shift_l', 'shift_r'):
+                display_keys.append('Shift')
+            elif key.lower() in ('meta_l', 'meta_r'):
+                display_keys.append('Cmd')
+            else:
+                display_keys.append(key.capitalize())
+
+        # 更新显示
+        self.configure(state='normal')  # 临时允许编辑
+        self.delete(0, tk.END)
+        hotkey_text = '+'.join(display_keys)
+        self.insert(0, hotkey_text)
+        self.configure(foreground='black')
+        self.configure(state='readonly')  # 恢复只读状态
+        print(f"当前按键: {hotkey_text}")  # 调试信息
+
+    def get_hotkey(self):
+        """获取标准格式的热键字符串"""
+        if not self.current_keys:
+            return ""
+            
+        hotkey_parts = []
+        for key in sorted(self.current_keys):
+            if key.lower() in ('control_l', 'control_r'):
+                hotkey_parts.append('ctrl')
+            elif key.lower() in ('alt_l', 'alt_r'):
+                hotkey_parts.append('alt')
+            elif key.lower() in ('shift_l', 'shift_r'):
+                hotkey_parts.append('shift')
+            elif key.lower() in ('meta_l', 'meta_r'):
+                hotkey_parts.append('cmd')
+            else:
+                hotkey_parts.append(key.lower())
+        
+        return '+'.join(hotkey_parts)
 
 class MainWindow:
     def __init__(self):
@@ -92,18 +231,51 @@ class MainWindow:
         self.kb_var = tk.StringVar(value=self.config.config["knowledge_base_id"])
         ttk.Entry(main_frame, textvariable=self.kb_var, width=40).grid(row=1, column=1, sticky=tk.W, pady=5)
 
+        # Document ID
+        ttk.Label(main_frame, text="文档 ID:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        self.doc_var = tk.StringVar(value=self.config.config["document_id"])
+        ttk.Entry(main_frame, textvariable=self.doc_var, width=40).grid(row=2, column=1, sticky=tk.W, pady=5)
+
         # API URL
-        ttk.Label(main_frame, text="API URL:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        ttk.Label(main_frame, text="API URL:").grid(row=3, column=0, sticky=tk.W, pady=5)
         self.url_var = tk.StringVar(value=self.config.config["api_url"])
-        ttk.Entry(main_frame, textvariable=self.url_var, width=40).grid(row=2, column=1, sticky=tk.W, pady=5)
+        ttk.Entry(main_frame, textvariable=self.url_var, width=40).grid(row=3, column=1, sticky=tk.W, pady=5)
 
         # Hotkey
-        ttk.Label(main_frame, text="快捷键:").grid(row=3, column=0, sticky=tk.W, pady=5)
-        self.hotkey_var = tk.StringVar(value=self.config.config["hotkey"])
-        ttk.Entry(main_frame, textvariable=self.hotkey_var, width=40).grid(row=3, column=1, sticky=tk.W, pady=5)
+        ttk.Label(main_frame, text="快捷键:").grid(row=4, column=0, sticky=tk.W, pady=5)
+        self.hotkey_entry = HotkeyEntry(main_frame, width=40)
+        self.hotkey_entry.grid(row=4, column=1, sticky=tk.W, pady=5)
+        
+        # 设置初始值
+        if self.config.config["hotkey"]:
+            # 将 pynput 格式的热键转换为显示格式
+            hotkey = self.config.config["hotkey"]
+            hotkey = hotkey.replace("<", "").replace(">", "")
+            hotkey = hotkey.replace("ctrl", "Ctrl").replace("alt", "Alt").replace("shift", "Shift").replace("cmd", "Cmd")
+            
+            # 更新显示
+            self.hotkey_entry.configure(state='normal')
+            self.hotkey_entry.delete(0, tk.END)
+            self.hotkey_entry.insert(0, hotkey)
+            self.hotkey_entry.configure(foreground='black')
+            self.hotkey_entry.configure(state='readonly')
+            
+            # 更新当前按键集合
+            self.hotkey_entry.current_keys.clear()
+            for key in hotkey.split('+'):
+                if key.lower() == 'ctrl':
+                    self.hotkey_entry.current_keys.add('Control_L')
+                elif key.lower() == 'alt':
+                    self.hotkey_entry.current_keys.add('Alt_L')
+                elif key.lower() == 'shift':
+                    self.hotkey_entry.current_keys.add('Shift_L')
+                elif key.lower() == 'cmd':
+                    self.hotkey_entry.current_keys.add('Meta_L')
+                else:
+                    self.hotkey_entry.current_keys.add(key.upper())
 
         # Save Button
-        ttk.Button(main_frame, text="保存配置", command=self.save_config).grid(row=4, column=0, columnspan=2, pady=20)
+        ttk.Button(main_frame, text="保存配置", command=self.save_config).grid(row=5, column=0, columnspan=2, pady=20)
 
     def setup_tray(self):
         # 在 macOS 上，我们可以使用 Dock 图标
@@ -111,50 +283,119 @@ class MainWindow:
         self.root.deiconify = self.show_window
 
     def setup_hotkey(self):
+        print(f"设置热键: {self.config.config['hotkey']}")  # 调试信息
+        if hasattr(self, 'hotkey_thread'):
+            self.hotkey_thread.stop()
         self.hotkey_thread = HotkeyThread(self.config.config["hotkey"], self.process_clipboard)
         self.hotkey_thread.start()
 
     def save_config(self):
         self.config.config["api_key"] = self.api_key_var.get()
         self.config.config["knowledge_base_id"] = self.kb_var.get()
+        self.config.config["document_id"] = self.doc_var.get()
         self.config.config["api_url"] = self.url_var.get()
-        self.config.config["hotkey"] = self.hotkey_var.get()
+        
+        # 获取新的快捷键
+        new_hotkey = self.hotkey_entry.get_hotkey()
+        if new_hotkey:
+            # 转换热键格式
+            hotkey_parts = []
+            for part in new_hotkey.split('+'):
+                part = part.strip().lower()
+                if part in ['ctrl', 'alt', 'shift', 'cmd']:
+                    hotkey_parts.append(f"<{part}>")
+                else:
+                    hotkey_parts.append(part)
+            
+            self.config.config["hotkey"] = '+'.join(hotkey_parts)
+        
         self.config.save_config()
-        
-        # 重新设置快捷键
-        self.hotkey_thread.stop()
-        self.setup_hotkey()
-        
-        messagebox.showinfo("成功", "配置已保存")
+        messagebox.showinfo("成功", "配置已保存，重启程序后快捷键生效")
 
     def process_clipboard(self):
         try:
+            print("开始处理选中文本")  # 调试信息
+            
+            # 保存当前剪贴板内容
+            old_clipboard = pyperclip.paste()
+            
+            # 使用 AppleScript 模拟复制操作
+            if sys.platform == 'darwin':  # macOS
+                import subprocess
+                subprocess.run(['osascript', '-e', 'tell application "System Events" to keystroke "c" using {command down}'])
+            else:  # Windows/Linux
+                keyboard.Controller().press(keyboard.Key.ctrl)
+                keyboard.Controller().press('c')
+                keyboard.Controller().release('c')
+                keyboard.Controller().release(keyboard.Key.ctrl)
+            
+            # 等待复制完成
+            time.sleep(0.5)
+            
+            # 获取新的剪贴板内容
             text = pyperclip.paste()
+            
+            # 恢复原来的剪贴板内容
+            pyperclip.copy(old_clipboard)
+            
+            print(f"获取到的文本: {text}")  # 调试信息
+            
             if not text:
+                print("未获取到文本")  # 调试信息
                 return
 
             headers = {
                 "Authorization": f"Bearer {self.config.config['api_key']}",
                 "Content-Type": "application/json"
             }
+            print(f"API Key: {self.config.config['api_key']}")  # 调试信息
+            print(f"知识库 ID: {self.config.config['knowledge_base_id']}")  # 调试信息
+            print(f"文档 ID: {self.config.config['document_id']}")  # 调试信息
+            print(f"API URL: {self.config.config['api_url']}")  # 调试信息
 
+            # 构建请求数据
             data = {
-                "knowledge_base_id": self.config.config["knowledge_base_id"],
                 "content": text
             }
 
-            response = requests.post(
-                f"{self.config.config['api_url']}/api/v1/documents",
-                headers=headers,
-                json=data
-            )
+            api_url = f"{self.config.config['api_url']}/api/v1/datasets/{self.config.config['knowledge_base_id']}/documents/{self.config.config['document_id']}/chunks"
+            print(f"发送请求到: {api_url}")  # 调试信息
+            print(f"请求数据: {data}")  # 调试信息
 
-            if response.status_code == 200:
-                messagebox.showinfo("成功", "文本已成功导入到知识库")
-            else:
-                messagebox.showerror("错误", f"导入失败: {response.text}")
+            try:
+                response = requests.post(
+                    api_url,
+                    headers=headers,
+                    json=data,
+                    timeout=10  # 添加超时设置
+                )
+                
+                print(f"API 响应状态码: {response.status_code}")  # 调试信息
+                print(f"API 响应内容: {response.text}")  # 调试信息
+
+                if response.status_code == 200:
+                    messagebox.showinfo("成功", "文本已成功导入到知识库")
+                else:
+                    error_msg = f"导入失败: HTTP {response.status_code}"
+                    if response.text:
+                        try:
+                            error_json = response.json()
+                            if 'message' in error_json:
+                                error_msg += f"\n{error_json['message']}"
+                        except:
+                            error_msg += f"\n{response.text}"
+                    messagebox.showerror("错误", error_msg)
+            except requests.exceptions.Timeout:
+                messagebox.showerror("错误", "请求超时，请检查网络连接和服务器状态")
+            except requests.exceptions.ConnectionError:
+                messagebox.showerror("错误", "连接错误，请检查网络连接和服务器地址")
+            except requests.exceptions.RequestException as e:
+                messagebox.showerror("错误", f"请求错误: {str(e)}")
 
         except Exception as e:
+            print(f"发生错误: {str(e)}")  # 调试信息
+            import traceback
+            traceback.print_exc()  # 打印完整的错误堆栈
             messagebox.showerror("错误", f"发生错误: {str(e)}")
 
     def hide_window(self):
